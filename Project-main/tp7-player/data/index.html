@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TP-7 Player</title>
+<style>
+:root{--bg:#0d0d0d;--fg:#e8e8e8;--dim:#777;--red:#ff3b30;--line:#262626;--card:#161616}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--fg);font:14px/1.5 -apple-system,system-ui,sans-serif;padding:16px;max-width:520px;margin:0 auto}
+h1{font-size:18px;letter-spacing:2px;margin-bottom:2px}
+h2{font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:var(--dim);margin:20px 0 8px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:12px}
+#track{font-size:15px;margin-bottom:8px;word-break:break-all;min-height:22px}
+#state{color:var(--red);font-size:11px;text-transform:uppercase;letter-spacing:1px}
+.bar{height:4px;background:var(--line);border-radius:2px;overflow:hidden;margin:10px 0}
+.bar>i{display:block;height:100%;background:var(--red);width:0;transition:width .3s}
+.btns{display:flex;gap:8px;margin-top:12px}
+button{flex:1;background:#1e1e1e;color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:10px;font-size:13px;cursor:pointer}
+button:active{background:var(--red);border-color:var(--red)}
+input[type=range]{width:100%;accent-color:var(--red);margin-top:4px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px}
+ul{list-style:none;max-height:240px;overflow-y:auto}
+li{padding:9px 6px;border-bottom:1px solid var(--line);cursor:pointer;font-size:13px;word-break:break-all}
+li:active{background:#222}
+li.dir{color:var(--dim)}
+.eq{display:flex;gap:4px;align-items:flex-end;height:110px}
+.eq>div{flex:1;display:flex;flex-direction:column;align-items:center;height:100%}
+.eq input{writing-mode:vertical-lr;direction:rtl;height:88px;width:20px;accent-color:var(--red)}
+.eq label{font-size:9px;color:var(--dim);margin-top:3px}
+input[type=text],input[type=password]{width:100%;background:#1e1e1e;border:1px solid var(--line);color:var(--fg);padding:9px;border-radius:4px;margin-bottom:6px}
+a{color:var(--red);text-decoration:none;font-size:12px}
+small{color:var(--dim);font-size:11px}
+</style>
+</head>
+<body>
+
+<h1>TP&ndash;7</h1>
+<small id="ip">&mdash;</small>
+
+<h2>Now Playing</h2>
+<div class="card">
+  <div id="track">No track</div>
+  <div id="state">stopped</div>
+  <div class="bar"><i id="prog"></i></div>
+  <div class="btns">
+    <button onclick="post('/api/pause')">Play / Pause</button>
+    <button onclick="post('/api/stop')">Stop</button>
+  </div>
+  <div class="row" style="margin-top:12px">
+    <small>Vol</small><small id="volval">50%</small>
+  </div>
+  <input type="range" id="vol" min="0" max="100" value="50"
+         oninput="volval.textContent=this.value+'%'"
+         onchange="post('/api/volume','vol='+this.value)">
+</div>
+
+<h2>Files</h2>
+<div class="card">
+  <div class="row" style="margin-bottom:8px">
+    <small id="cwd">/</small>
+    <button style="flex:0;padding:5px 12px;font-size:11px" onclick="up()">Up</button>
+  </div>
+  <ul id="files"><li>Loading&hellip;</li></ul>
+</div>
+
+<h2>Equalizer</h2>
+<div class="card">
+  <div class="eq" id="eq"></div>
+</div>
+
+<h2>WiFi</h2>
+<div class="card">
+  <input type="text" id="ssid" placeholder="SSID">
+  <input type="password" id="pass" placeholder="Password">
+  <button onclick="post('/api/wifi','ssid='+encodeURIComponent(ssid.value)+'&pass='+encodeURIComponent(pass.value))">Connect</button>
+</div>
+
+<h2>Firmware</h2>
+<div class="card"><a href="/update">Open OTA updater &rarr;</a></div>
+
+<script>
+const BANDS=['31','62','125','250','500','1K','2K','4K','8K','16K'];
+let cwd='/';
+
+function post(url,body){
+  return fetch(url,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body||''});
+}
+
+// EQ sliders
+const eqEl=document.getElementById('eq');
+BANDS.forEach((label,i)=>{
+  const d=document.createElement('div');
+  d.innerHTML=`<input type="range" min="-12" max="12" value="0" step="1"
+    onchange="post('/api/eq','band=${i}&gain='+this.value)"><label>${label}</label>`;
+  eqEl.appendChild(d);
+});
+
+function loadFiles(dir){
+  cwd=dir;
+  document.getElementById('cwd').textContent=dir;
+  fetch('/api/files?dir='+encodeURIComponent(dir)).then(r=>r.json()).then(list=>{
+    const ul=document.getElementById('files');
+    ul.innerHTML='';
+    if(!list.length){ul.innerHTML='<li class="dir">Empty</li>';return}
+    list.forEach(f=>{
+      const li=document.createElement('li');
+      li.textContent=(f.dir?'[ '+f.name+' ]':f.name);
+      if(f.dir)li.className='dir';
+      li.onclick=()=>{
+        const p=(dir.endsWith('/')?dir:dir+'/')+f.name;
+        if(f.dir)loadFiles(p+'/');
+        else post('/api/play','path='+encodeURIComponent(p));
+      };
+      ul.appendChild(li);
+    });
+  }).catch(()=>{document.getElementById('files').innerHTML='<li class="dir">SD error</li>'});
+}
+
+function up(){
+  if(cwd==='/')return;
+  const parts=cwd.replace(/\/$/,'').split('/');
+  parts.pop();
+  loadFiles((parts.join('/')||'')+'/');
+}
+
+function refresh(){
+  fetch('/api/status').then(r=>r.json()).then(s=>{
+    document.getElementById('track').textContent=(s.track||'').split('/').pop()||'No track';
+    document.getElementById('state').textContent=s.state||'';
+    document.getElementById('prog').style.width=((s.progress||0)*100)+'%';
+    document.getElementById('ip').textContent=s.wifi||'';
+    if(document.activeElement.id!=='vol'&&s.volume!=null){
+      document.getElementById('vol').value=s.volume;
+      document.getElementById('volval').textContent=s.volume+'%';
+    }
+    if(s.eq)s.eq.forEach((g,i)=>{
+      const inp=eqEl.children[i].firstElementChild;
+      if(document.activeElement!==inp)inp.value=g;
+    });
+  }).catch(()=>{});
+}
+
+loadFiles('/');
+refresh();
+setInterval(refresh,2000);
+</script>
+</body>
+</html>
